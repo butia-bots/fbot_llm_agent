@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <include file="$(find fbot_robot_learning)/launch/skill_inference_server.launch">
+    </include>
+
+    <include file="$(find fbot_llm_agent)/launch/crewai_agent.launch">
+    </include>
+</launch>
