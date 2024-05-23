@@ -35,6 +35,7 @@ if __name__ == '__main__':
     llm_api_base_url = rospy.get_param('~llm_api_base_url', None)
     get_available_policies = rospy.ServiceProxy('/fbot_robot_learning/get_available_policies', GetAvailablePolicies)
     execute_tasks_server = rospy.Service('/fbot_llm_agent/execute_tasks', ExecuteTasks, handler=handle_execute_tasks)
+    rospy.wait_for_service('/fbot_robot_learning/get_available_policies')
     available_policies_res: GetAvailablePoliciesResponse = get_available_policies.call()
     
     tools = []

@@ -5,6 +5,7 @@ from butia_vision_msgs.msg import Recognitions3D, Description3D
 from butia_vision_msgs.srv import SetClass, SetClassRequest
 from geometry_msgs.msg import PoseStamped
 from gym_fbot.arm.moveit_arm import MoveItArm
+from gym_fbot.neck.sim_neck import SimNeck
 import rospy
 from tf import TransformListener
 from tf.transformations import euler_from_quaternion
@@ -23,12 +24,14 @@ def make_imitation_learning_tool(policy_info: PolicyInfo):
     execute_policy_service_proxy = rospy.ServiceProxy('/fbot_robot_learning/execute_policy', ExecutePolicy)
     recognitions_sub = rospy.Subscriber('/butia_vision/br/object_recognition3d', Recognitions3D, callback=update_recognitions3d)
     arm = MoveItArm()
+    neck = SimNeck()
     tfl = TransformListener()
 
     def imitation_learning_tool(object_to_approach: Optional[str]=None, sort_axis: Optional[Literal["x", "y", "z"]]=None, sort_order: Optional[Literal["ascending", "descending"]]=None, approach_distance_from_centroid: Optional[float]=None)->str:
         global recognitions3d
         global tfl
         descriptions = None
+        neck.set_angles(np.array([0.0, 0.0]))
         if object_to_approach != None:
             set_class_service_proxy.call(class_name=object_to_approach)
             rospy.wait_for_message('/butia_vision/br/object_recognition3d')
