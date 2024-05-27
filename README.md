@@ -1,6 +1,18 @@
 # Install
 
-Install dependencies with pip (might require python 3.10)
+Install Ollama on the Jetson Orin AGX (ignore the 404 error)
+
+```sh
+curl https://ollama.com/install.sh | sh
+```
+
+On the Jetson Orin AGX, pull the `llava-llama3` from the Ollama repository
+
+```sh
+ollama pull llava-llama3
+```
+
+Install dependencies on the Intel NUC with pip (might require a python 3.10 conda environment)
 
 ```sh
 pip install -r requirements.txt
@@ -8,9 +20,11 @@ pip install -r requirements.txt
 
 # How to Use
 
-Edit `config/vlm_agent.yaml` and update the parameters if required
+Edit `config/vlm_agent.yaml` and update the parameters if required.
 
-Export the API keys as environment variables
+Change the "localhost" in the parameter `llm_api_base_url` to the IP adress of the Jetson Orin AGX.
+
+Export the API keys as environment variables (also add the lines to the .zshrc and .bashrc files in the home directory)
 
 ```sh
 export OPENAI_API_KEY=...(place a dummy value if using local model)

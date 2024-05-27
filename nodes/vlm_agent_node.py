@@ -176,7 +176,7 @@ def select_tool(state: AgentState):
 class VLMAgentNode:
     def __init__(self):
         self.read_parameters()
-        self.chat_model = ChatOpenAI(model_name=self.vlm_model, api_base=self.llm_api_base_url)
+        self.chat_model = ChatOpenAI(model_name=self.vlm_model, openai_api_base=self.llm_api_base_url)
         self.robot_interface = RobotInterface(manipulator_model=self.manipulator_model)
         self.agent_prompt = hub.pull(self.prompt_repo)
         self.agent = annotate | RunnablePassthrough.assign(
