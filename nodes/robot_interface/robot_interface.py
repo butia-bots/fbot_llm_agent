@@ -24,7 +24,9 @@ import math
 class RobotInterface:
     def __init__(self, manipulator_model="doris_arm"):
         self.manipulator_model = manipulator_model
-        self.manipulator = InterbotixManipulatorXS(robot_model=self.manipulator_model)
+
+        if self.manipulator_model != None:
+            self.manipulator = InterbotixManipulatorXS(robot_model=self.manipulator_model)
 
         self.move_base_client = SimpleActionClient("move_base", MoveBaseAction)
 
@@ -109,6 +111,7 @@ class RobotInterface:
         self.move_base_client.send_goal_and_wait(goal=goal)
 
     def retreat_arm(self):
+        assert self.manipulator_model is not None
         self.manipulator.arm.go_to_home_pose()
 
     def grasp(self, grasp_pose: np.ndarray):
@@ -134,11 +137,13 @@ class RobotInterface:
     
     def move_arm(self, pose: np.ndarray):
         """Move the end-effector to the pose specified as a 1-D numpy array of length 6, representing x, y, z, roll, pitch, yaw in the arm coordinate frame"""
+        assert self.manipulator_model is not None
         x, y, z, roll, pitch, yaw = pose
         self.manipulator.arm.set_ee_pose_components(x=x, y=y, z=z, roll=roll, pitch=pitch)
 
     def get_arm_pose(self)->np.ndarray:
         """Gets the current end-effector pose in the arm reference frame"""
+        assert self.manipulator_model is not None
         pose_matrix: np.ndarray = self.manipulator.arm.get_ee_pose()
         position = pose_matrix[:3,3].flatten()
         orientation = euler_from_matrix(pose_matrix[:3,:3])
@@ -146,14 +151,17 @@ class RobotInterface:
 
     def open_gripper(self):
         """Open the gripper"""
+        assert self.manipulator_model is not None
         self.manipulator.gripper.open()
 
     def close_gripper(self):
         """Close the gripper"""
+        assert self.manipulator_model is not None
         self.manipulator.gripper.close()
 
     def get_arm_reference_frame(self)->str:
         """Gets the arm reference frame"""
+        assert self.manipulator_model is not None
         return f'{self.manipulator_model}/base_link'
 
     def get_camera_reference_frame(self)->str:

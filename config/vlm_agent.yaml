@@ -2,5 +2,7 @@ llm_api_base_url: http://localhost:11434
 vlm_model: llava-llama3
 manipulator_model: doris_arm
 #manipulator_model: wx200
+#manipulator_model: null
 prompt_repo: crislmfroes/fbot-vlm-agent
+#prompt_repo: crislmfroes/fbot-vlm-agent-no-manipulation
 max_steps: 25

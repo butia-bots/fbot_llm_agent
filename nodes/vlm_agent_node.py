@@ -218,10 +218,15 @@ class VLMAgentNode:
         graph_builder.add_edge("update_scratchpad", "agent")
 
         tools = {
-            'Grasp': grasp,
-            'PlaceOn': place_on,
             'NavigateToWaypoint': navigate_to_waypoint,
         }
+
+        if self.manipulator_model is not None:
+            manipulation_tools = {
+                'Grasp': grasp,
+                'PlaceOn': place_on,
+            }
+            tools = {**tools, **manipulation_tools}
 
         for node_name, tool in tools.items():
             graph_builder.add_node(node_name, RunnableLambda(tool) | (lambda observation: {"observation": observation}))
