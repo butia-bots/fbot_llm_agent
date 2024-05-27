@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="fbot_llm_agent" type="vlm_agent_node.py" name="vlm_agent_node">
+        <rosparam file="$(find fbot_llm_agent)/config/vlm_agent.yaml" command="load" />
+    </node>
+</launch>
