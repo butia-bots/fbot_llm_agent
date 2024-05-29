@@ -3,6 +3,7 @@ from butia_vision_msgs.srv import ListClasses, ListClassesRequest, ListClassesRe
 #from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
 from butia_vision_msgs.msg import Description3D, Recognitions3D
 from butia_world_msgs.srv import GetPose, GetPoseRequest, GetPoseResponse
+from butia_speech.srv import SynthesizeSpeech, SynthesizeSpeechRequest, SynthesizeSpeechResponse
 import rospy
 from typing import List, Tuple
 import numpy as np
@@ -35,6 +36,8 @@ class RobotInterface:
         self.recognitions3d_sub = rospy.Subscriber('/butia_vision/br/object_recognition3d', Recognitions3D, callback=self._update_recognitions3d)
         self.image_subscriber = rospy.Subscriber('/butia_vision/bvb/image_rgb', Image, callback=self._update_image_rgb)
 
+        self.synthesize_speech_proxy = rospy.ServiceProxy('/butia_speech/ss/say_something', SynthesizeSpeech)
+
         self.get_waypoint_proxy = rospy.ServiceProxy('/butia_world/get_pose', GetPose)
 
         self.tfl = TransformListener()
@@ -46,6 +49,12 @@ class RobotInterface:
 
     def _update_image_rgb(self, msg: Image):
         self.image_rgb_msg = msg
+
+    def speak(self, utterance: str):
+        req = SynthesizeSpeechRequest()
+        req.lang = 'en'
+        req.text = utterance
+        res: SynthesizeSpeechResponse = self.synthesize_speech_proxy.call(req)
 
     def annotate_camera_view(self):
         image_rgb = self.image_rgb_msg

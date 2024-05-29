@@ -163,24 +163,6 @@ def annotate(state: AgentState):
     marked_view = mark_view.with_retry().invoke(state['robot_interface'])
     return {**state, **marked_view}
 
-def parse(text: str):
-    action_prefix = "Action: "
-    if not text.strip().split("\n")[-1].startswith(action_prefix):
-        return {"action": "retry", "args": f"Could not parse LLM Output: {text}"}
-    action_block = text.strip().split("\n")[-1]
-    action_str = action_block[len(action_prefix) :]
-    split_output = action_str.split(" ", 1)
-    if len(split_output) == 1:
-        action, action_input = split_output[0], None
-    else:
-        action, action_input = split_output
-    action = action.strip()
-    if action_input is not None:
-        action_input = [
-            inp.strip().strip("[]") for inp in action_input.strip().split(";")
-        ]
-    return {"action": action, "args": action_input}
-
 def format_descriptions(state: AgentState):
     labels = []
     for i, description in enumerate(state['recognitions'].descriptions):
@@ -207,7 +189,7 @@ class VLMAgentNode:
         self.robot_interface = RobotInterface(manipulator_model=self.manipulator_model)
         self.agent_prompt = hub.pull(self.prompt_repo)
         self.agent = annotate | RunnablePassthrough.assign(
-            prediction=format_descriptions | self.agent_prompt | self.chat_model | StrOutputParser() | parse
+            prediction=format_descriptions | self.agent_prompt | self.chat_model | StrOutputParser() | self.parse
         )
         self.make_graph()
         self.execute_tasks_server = rospy.Service('/fbot_llm_agent/execute_tasks', ExecuteTasks, handler=self.handle_execute_tasks)
@@ -277,6 +259,27 @@ class VLMAgentNode:
             return {**state, "scratchpad": [SystemMessage(content=txt)]}
         elif self.llm_api_type in ('google',):
             return {**state, "scratchpad": [HumanMessage(content=txt)]}
+
+    def parse(self, text: str):
+        thought_prefix = "Thought: "
+        thought = '\n'.join(text.strip().split('\n')[:-1]).strip(thought_prefix)
+        self.robot_interface.speak(utterance=thought)
+        action_prefix = "Action: "
+        if not text.strip().split("\n")[-1].startswith(action_prefix):
+            return {"action": "retry", "args": f"Could not parse LLM Output: {text}"}
+        action_block = text.strip().split("\n")[-1]
+        action_str = action_block[len(action_prefix) :]
+        split_output = action_str.split(" ", 1)
+        if len(split_output) == 1:
+            action, action_input = split_output[0], None
+        else:
+            action, action_input = split_output
+        action = action.strip()
+        if action_input is not None:
+            action_input = [
+                inp.strip().strip("[]") for inp in action_input.strip().split(";")
+            ]
+        return {"action": action, "args": action_input}
 
     def read_parameters(self):
         self.llm_api_base_url = rospy.get_param("~llm_api_base_url", 'http://localhost:11434')
