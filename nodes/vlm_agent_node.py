@@ -2,8 +2,9 @@
 
 from robot_interface.robot_interface import RobotInterface
 from langchain_openai.chat_models import ChatOpenAI
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 from typing import List, Optional, TypedDict
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.runnables import chain as chain_decorator
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.runnables import RunnableLambda
@@ -22,6 +23,7 @@ import base64
 from io import BytesIO
 import re
 import os
+import math
 
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Fbot-VLM-Agent"
@@ -112,6 +114,40 @@ def navigate_to_waypoint(state: AgentState):
     robot_interface.move_mobile_base(pose=waypoint_pose)
     return f"Navigated to waypoint {waypoint_name}"
 
+def follow_person(state: AgentState):
+    robot_interface = state['robot_interface']
+    action_args = state['prediction']['args']
+    if action_args is None or len(action_args) != 1:
+        return f"Failed to follow person {action_args}"
+    description_id = action_args[0]
+    description_id = int(description_id)
+    try:
+        description = state['recognitions'].descriptions[description_id]
+    except:
+        return f"Error: no bbox for : {description_id}"
+    last_pose = np.array([
+        description.bbox.center.position.x,
+        description.bbox.center.position.y,
+        description.bbox.center.position.z,
+        0.0,
+        0.0,
+        0.0
+    ])
+    last_pose = robot_interface.transform_pose(last_pose, description.header.frame_id, robot_interface.get_map_reference_frame())
+    robot_pose = robot_interface.get_mobile_base_pose()
+    rate = rospy.Rate(10)
+    while np.linalg.norm(last_pose[:2] - robot_pose[:2]) > 1.0:
+        last_pose[5] = math.atan2(last_pose[1] - robot_pose[1], last_pose[0] - robot_pose[0])
+        robot_interface.move_mobile_base(last_pose, blocking=False)
+        positions, clouds = robot_interface.object_detection_3d(class_name=description.label)
+        poses = [robot_interface.transform_pose(np.array([*position, 0.0, 0.0, 0.0]), robot_interface.get_camera_reference_frame(), robot_interface.get_map_reference_frame()) for position in positions]
+        poses.sort(key=lambda p: np.linalg.norm(p[:2] - last_pose[:2]))
+        last_pose = poses[0]
+        robot_pose = robot_interface.get_mobile_base_pose()
+        rate.sleep()
+    return f"Followed: {description_id}"
+
+
 @chain_decorator
 def mark_view(robot_interface: RobotInterface):
     recognitions, annotated_image_arr = robot_interface.annotate_camera_view()
@@ -153,18 +189,6 @@ def format_descriptions(state: AgentState):
     bbox_descriptions = "\nValid Bounding Boxes:\n" + "\n".join(labels)
     return {**state, "bbox_descriptions": bbox_descriptions}
 
-def update_scratchpad(state: AgentState):
-    old = state.get("scratchpad")
-    if old:
-        txt: str = old[0].content
-        last_line = txt.rsplit("\n", 1)[-1]
-        step = int(re.match(r"\d+", last_line).group()) + 1
-    else:
-        txt = "Previous action observations:\n"
-        step = 1
-    txt += f"\n{step}. {state['observation']}"
-    return {**state, "scratchpad": [SystemMessage(content=txt)]}
-
 def select_tool(state: AgentState):
     action = state['prediction']['action']
     if action == 'ANSWER':
@@ -176,7 +200,10 @@ def select_tool(state: AgentState):
 class VLMAgentNode:
     def __init__(self):
         self.read_parameters()
-        self.chat_model = ChatOpenAI(model_name=self.vlm_model, openai_api_base=self.llm_api_base_url)
+        if self.llm_api_type == 'openai':
+            self.chat_model = ChatOpenAI(model_name=self.vlm_model, openai_api_base=self.llm_api_base_url)
+        elif self.llm_api_type == 'google':
+            self.chat_model = ChatGoogleGenerativeAI(model=self.vlm_model)
         self.robot_interface = RobotInterface(manipulator_model=self.manipulator_model)
         self.agent_prompt = hub.pull(self.prompt_repo)
         self.agent = annotate | RunnablePassthrough.assign(
@@ -214,11 +241,12 @@ class VLMAgentNode:
         graph_builder.add_node("agent", self.agent)
         graph_builder.set_entry_point("agent")
         
-        graph_builder.add_node("update_scratchpad", update_scratchpad)
+        graph_builder.add_node("update_scratchpad", self.update_scratchpad)
         graph_builder.add_edge("update_scratchpad", "agent")
 
         tools = {
             'NavigateToWaypoint': navigate_to_waypoint,
+            'FollowPerson': follow_person,
         }
 
         if self.manipulator_model is not None:
@@ -235,12 +263,28 @@ class VLMAgentNode:
         graph_builder.add_conditional_edges("agent", select_tool)
         self.agent_executor = graph_builder.compile()
 
+    def update_scratchpad(self, state: AgentState):
+        old = state.get("scratchpad")
+        if old:
+            txt: str = old[0].content
+            last_line = txt.rsplit("\n", 1)[-1]
+            step = int(re.match(r"\d+", last_line).group()) + 1
+        else:
+            txt = "Previous action observations:\n"
+            step = 1
+        txt += f"\n{step}. {state['observation']}"
+        if self.llm_api_type in ('openai',):
+            return {**state, "scratchpad": [SystemMessage(content=txt)]}
+        elif self.llm_api_type in ('google',):
+            return {**state, "scratchpad": [HumanMessage(content=txt)]}
+
     def read_parameters(self):
         self.llm_api_base_url = rospy.get_param("~llm_api_base_url", 'http://localhost:11434')
         self.vlm_model = rospy.get_param('~vlm_model', 'llava-llama3')
         self.manipulator_model = rospy.get_param('~manipulator_model', 'doris_arm')
         self.prompt_repo = rospy.get_param("~prompt_repo", "crislmfroes/fbot-vlm-agent")
         self.max_steps = rospy.get_param("~max_steps", 25)
+        self.llm_api_type = rospy.get_param("~llm_api_type", "google")
 
 
 if __name__ == '__main__':

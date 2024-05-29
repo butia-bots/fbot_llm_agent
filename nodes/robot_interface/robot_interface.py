@@ -95,7 +95,7 @@ class RobotInterface:
         translation, rotation = self.tfl.lookupTransform(self.get_map_reference_frame(), "base_footprint", rospy.Time())
         return np.array([*translation, euler_from_quaternion(rotation)])
     
-    def move_mobile_base(self, pose: np.ndarray):
+    def move_mobile_base(self, pose: np.ndarray, blocking: bool=True):
         """Navigates the mobile base to the given pose in the map reference frame, given as a x, y, z, roll, pitch, yaw numpy array. Only the x, y, and yaw values are used."""
         ps = PoseStamped()
         ps.header.frame_id = 'map'
@@ -108,7 +108,10 @@ class RobotInterface:
         ps.pose.orientation.w = quat[3]
         goal = MoveBaseGoal()
         goal.target_pose = ps
-        self.move_base_client.send_goal_and_wait(goal=goal)
+        if blocking == True:
+            self.move_base_client.send_goal_and_wait(goal=goal)
+        else:
+            self.move_base_client.send_goal(goal=goal)
 
     def retreat_arm(self):
         assert self.manipulator_model is not None
