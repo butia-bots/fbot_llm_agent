@@ -1,6 +1,4 @@
 from langchain_core.tools import StructuredTool
-from gym_fbot.arm.moveit_arm import MoveItArm
-from gym_fbot.gripper.moveit_gripper import MoveItGripper
 from butia_vision_msgs.srv import ListClasses, ListClassesRequest, ListClassesResponse
 from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
 from butia_vision_msgs.msg import Description3D, Recognitions3D
