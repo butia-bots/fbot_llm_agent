@@ -282,6 +282,8 @@ class VLMAgentNode:
         self.llm_api_base_url = rospy.get_param("~llm_api_base_url", 'http://localhost:11434')
         self.vlm_model = rospy.get_param('~vlm_model', 'llava-llama3')
         self.manipulator_model = rospy.get_param('~manipulator_model', 'doris_arm')
+        if self.manipulator_model == 'disable':
+            self.manipulator_model = None
         self.prompt_repo = rospy.get_param("~prompt_repo", "crislmfroes/fbot-vlm-agent")
         self.max_steps = rospy.get_param("~max_steps", 25)
         self.llm_api_type = rospy.get_param("~llm_api_type", "google")

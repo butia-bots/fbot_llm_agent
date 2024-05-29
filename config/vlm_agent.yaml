@@ -3,6 +3,6 @@ llm_api_type: google
 vlm_model: gemini-1.5-play
 #manipulator_model: doris_arm
 #manipulator_model: wx200
-manipulator_model: null
+manipulator_model: disable
 prompt_repo: crislmfroes/fbot-vlm-agent
 max_steps: 25
