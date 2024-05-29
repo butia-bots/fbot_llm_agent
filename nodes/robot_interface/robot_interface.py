@@ -1,6 +1,6 @@
 from langchain_core.tools import StructuredTool
 from butia_vision_msgs.srv import ListClasses, ListClassesRequest, ListClassesResponse
-from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
+#from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
 from butia_vision_msgs.msg import Description3D, Recognitions3D
 from butia_world_msgs.srv import GetPose, GetPoseRequest, GetPoseResponse
 import rospy
