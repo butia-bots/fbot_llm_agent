@@ -261,12 +261,13 @@ class VLMAgentNode:
             return {**state, "scratchpad": [HumanMessage(content=txt)]}
 
     def parse(self, text: str):
-        thought_prefix = "Thought: "
-        thought = '\n'.join(text.strip().split('\n')[:-1]).strip(thought_prefix)
-        self.robot_interface.speak(utterance=thought)
+        
         action_prefix = "Action: "
         if not text.strip().split("\n")[-1].startswith(action_prefix):
             return {"action": "retry", "args": f"Could not parse LLM Output: {text}"}
+        thought_prefix = "Thought: "
+        thought = '\n'.join(text.strip().split('\n')[:-1]).strip(thought_prefix)
+        self.robot_interface.speak(utterance=thought)
         action_block = text.strip().split("\n")[-1]
         action_str = action_block[len(action_prefix) :]
         split_output = action_str.split(" ", 1)

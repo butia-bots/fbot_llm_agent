@@ -1,5 +1,21 @@
 <?xml version="1.0"?>
 <launch>
+    <include file="$(find butia_launchfiles)/launch/navigate_people_recognition.launch">
+        
+    </include>
+
+    <include file="$(find butia_world)/launch/pose_recepcionist.launch">
+        
+    </include>
+
+    <include file="$(find butia_speech)/launch/synthesizer_speech.launch">
+        
+    </include>
+
+    <include file="$(find robotFace)/launch/face.launch">
+        <arg name="output" value="screen"/>
+    </include>
+
     <node pkg="fbot_llm_agent" type="vlm_agent_node.py" name="vlm_agent_node">
         <rosparam file="$(find fbot_llm_agent)/config/vlm_agent.yaml" command="load" />
     </node>
