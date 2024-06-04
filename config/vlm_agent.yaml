@@ -1,6 +1,6 @@
 llm_api_type: google
 #llm_api_base_url: http://localhost:11434
-vlm_model: gemini-1.5-play
+vlm_model: gemini-1.5-flash
 #manipulator_model: doris_arm
 #manipulator_model: wx200
 manipulator_model: disable

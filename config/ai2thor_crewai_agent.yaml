@@ -1,0 +1,8 @@
+robot_name: DoRIS
+#Ollama
+#llm_api_model: llama3
+#llm_api_base_url: http://localhost:11434
+
+#groq
+llm_api_model: llama3-8b-8192
+llm_api_base_url: https://api.groq.com/openai/v1

@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="fbot_llm_agent" type="ai2thor_crewai_agent_node.py" name="ai2thor_crewai_agent_node" output="screen">
+        <rosparam file="$(find fbot_llm_agent)/config/ai2thor_crewai_agent.yaml" command="load" />
+    </node>
+</launch>
