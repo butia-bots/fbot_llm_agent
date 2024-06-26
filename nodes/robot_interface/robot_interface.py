@@ -43,7 +43,7 @@ class RobotInterface:
 
         self.tfl = TransformListener()
 
-        self.neck_pub.publish(data=[0.0, 0.0])
+        self.neck_pub.publish(data=[180.0, 180.0])
 
     def _update_recognitions3d(self, msg: Recognitions3D):
         self.recognitions3d_msg = msg
