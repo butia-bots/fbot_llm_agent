@@ -1,8 +1,23 @@
 robot_name: DoRIS
 #Ollama
-#llm_api_model: llama3
-#llm_api_base_url: http://localhost:11434
+llm_api_type: ollama
+llm_api_model: phi3-fbot-llm-planner
 
 #groq
-llm_api_model: llama3-8b-8192
-llm_api_base_url: https://api.groq.com/openai/v1
+#llm_api_type: groq
+#llm_api_model: llama3-8b-8192
+#llm_api_base_url: https://api.groq.com/openai/v1
+
+#llm_api_type: google
+#llm_api_model: gemini-1.5-flash
+
+benchmark: true
+benchmark_iterations: 1000
+benchmark_oracle: true
+use_context: false
+use_planner: false
+use_smart_tool: true
+use_image: false
+world_model_iterations: 3
+save_dataset: false
+subsplit: test

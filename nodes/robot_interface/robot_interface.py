@@ -1,6 +1,6 @@
 from langchain_core.tools import StructuredTool
 from butia_vision_msgs.srv import ListClasses, ListClassesRequest, ListClassesResponse
-#from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
+from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
 from butia_vision_msgs.msg import Description3D, Recognitions3D
 from butia_world_msgs.srv import GetPose, GetPoseRequest, GetPoseResponse
 from butia_speech.srv import SynthesizeSpeech, SynthesizeSpeechRequest, SynthesizeSpeechResponse
@@ -19,6 +19,7 @@ from sensor_msgs.msg import Image
 from maestro.visualizers import MarkVisualizer
 import supervision as sv
 import math
+from transformers import Tool
 
 class RobotInterface:
     def __init__(self, manipulator_model="doris_arm"):
@@ -32,7 +33,7 @@ class RobotInterface:
         self.neck_pub = rospy.Publisher("neck", Float64MultiArray, queue_size=1)
 
         self.list_classes_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/list_classes', ListClasses)
-        #self.set_class_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/set_class', SetClass)
+        self.set_class_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/set_class', SetClass)
         self.recognitions3d_sub = rospy.Subscriber('/butia_vision/br/object_recognition3d', Recognitions3D, callback=self._update_recognitions3d)
         self.image_subscriber = rospy.Subscriber('/butia_vision/bvb/image_rgb', Image, callback=self._update_image_rgb)
 
@@ -212,8 +213,8 @@ class RobotInterface:
 
     def object_detection_3d(self, class_name: str)->Tuple[List[np.ndarray]]:
         """Performs 3d object detection, given a class name. Returns a tuple of ([xyz_centroid_position_as_np_array, ...], [xyz_point_cloud_as_np_array, ...]). Poses are in the camera reference frame."""
-        #if class_name not in self.list_detection_classes():
-        #    self.add_detection_class(class_name=class_name)
+        if class_name not in self.list_detection_classes():
+            self.add_detection_class(class_name=class_name)
         rospy.wait_for_message(self.recognitions3d_sub.name, Recognitions3D)
         descriptions = filter(lambda e: e.label, self.recognitions3d_msg.descriptions)
         positions = [np.array([description.bbox.center.position.x, description.bbox.center.position.y, description.bbox.center.position.z]) for description in descriptions]
@@ -239,7 +240,7 @@ class RobotInterface:
         req.class_name = class_name
         res: SetClassResponse = self.set_class_proxy.call(req)
 
-    def get_code_tools(self):
+    def get_code_tools_langchain(self):
         return [
             StructuredTool.from_function(self.move_arm, name='move_arm'),
             StructuredTool.from_function(self.get_arm_pose, name='get_arm_pose'),
@@ -257,3 +258,6 @@ class RobotInterface:
             StructuredTool.from_function(self.get_waypoint_pose, name="get_waypoint_pose"),
             StructuredTool.from_function(self.transform_pose, name='transform_pose'),
         ]
+
+    def get_code_tools_hf(self):
+        return [Tool.from_langchain(t) for t in self.get_code_tools_langchain()]
