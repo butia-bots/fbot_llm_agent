@@ -17,6 +17,6 @@ if __name__ == '__main__':
     rospy.init_node('crewai_agent_node', anonymous=True)
     robot_interface = RobotInterface(manipulator_model="wx200")
     llm_engine = HfEngine(model="meta-llama/Meta-Llama-3-8B-Instruct")
-    agent = ReactCodeAgent(tools=robot_interface.get_code_tools_hf(), llm_engine=llm_engine)
+    agent = ReactCodeAgent(tools=robot_interface.get_code_tools_hf(), llm_engine=llm_engine, verbose=1)
     execute_tasks_server = rospy.Service('/fbot_llm_agent/execute_tasks', ExecuteTasks, handler=handle_execute_tasks)
     rospy.spin()
