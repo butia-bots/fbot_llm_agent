@@ -1,5 +1,7 @@
 # Install
 
+Follow [this guide](https://github.com/butia-bots/butia_vision/blob/feature/vlm-recognition/butia_recognition/scripts/butia_recognition/paligemma_recognition/README.md) for installing the `feature/vlm-recognition` branch of butia_vision.
+
 Install dependencies on the Intel NUC with pip (might require a python 3.10 conda environment)
 
 ```sh
