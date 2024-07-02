@@ -26,7 +26,7 @@ class RobotInterface:
         self.manipulator_model = manipulator_model
 
         if self.manipulator_model != None:
-            self.manipulator = InterbotixManipulatorXS(robot_model=self.manipulator_model)
+            self.manipulator = InterbotixManipulatorXS(robot_model=self.manipulator_model, init_node=False)
 
         self.move_base_client = SimpleActionClient("move_base", MoveBaseAction)
 
@@ -78,7 +78,7 @@ class RobotInterface:
         """Gets the names of the available waypoints in the map"""
         return rospy.get_param('/butia_world/pose/targets', {}).keys()
 
-    def get_waypoint_pose(self, waypoint_name: str)->np.ndarray:
+    def get_waypoint_pose(self, waypoint_name: str)->List[float]:
         """Gets the pose of the waypoint, in the map reference frame"""
         req = GetPoseRequest()
         req.key = f'target/{waypoint_name}/pose'
@@ -95,16 +95,16 @@ class RobotInterface:
             res.pose.orientation.w
         ]
         orientation = euler_from_quaternion(quat)
-        return np.array([*position, *orientation])
+        return [*position, *orientation]
 
-    def get_mobile_base_pose(self)->np.ndarray:
+    def get_mobile_base_pose(self)->List[float]:
         """Gets the current mobile base pose, in the map reference frame"""
         self.tfl.waitForTransform(self.get_map_reference_frame(), "base_footprint", rospy.Time(), rospy.Duration(10.0))
         translation, rotation = self.tfl.lookupTransform(self.get_map_reference_frame(), "base_footprint", rospy.Time())
-        return np.array([*translation, euler_from_quaternion(rotation)])
+        return [*translation, euler_from_quaternion(rotation)]
     
-    def move_mobile_base(self, pose: np.ndarray, blocking: bool=True):
-        """Navigates the mobile base to the given pose in the map reference frame, given as a x, y, z, roll, pitch, yaw numpy array. Only the x, y, and yaw values are used."""
+    def move_mobile_base(self, pose: List[float], blocking: bool=True):
+        """Navigates the mobile base to the given pose in the map reference frame, given as a x, y, z, roll, pitch, yaw list. Only the x, y, and yaw values are used."""
         ps = PoseStamped()
         ps.header.frame_id = 'map'
         ps.pose.position.x = pose[0]
@@ -125,7 +125,7 @@ class RobotInterface:
         assert self.manipulator_model is not None
         self.manipulator.arm.go_to_home_pose()
 
-    def grasp(self, grasp_pose: np.ndarray):
+    def grasp(self, grasp_pose: List[float]):
         """Executes a grasp at the given grasp pose. The grasp pose must be in the arm reference frame"""
         pre_grasp_pose = grasp_pose.copy()
         yaw = math.atan2(pre_grasp_pose[1], pre_grasp_pose[0])
@@ -139,26 +139,26 @@ class RobotInterface:
         self.close_gripper()
         self.move_arm(pose=post_grasp_pose)
 
-    def place(self, place_pose: np.ndarray):
+    def place(self, place_pose: List[float]):
         """Executes a placement at the given place pose. The place pose must be in the arm reference frame"""
         place_pose = place_pose.compy()
         place_pose[2] += 0.2
         self.move_arm(pose=place_pose)
         self.open_gripper()
     
-    def move_arm(self, pose: np.ndarray):
-        """Move the end-effector to the pose specified as a 1-D numpy array of length 6, representing x, y, z, roll, pitch, yaw in the arm coordinate frame"""
+    def move_arm(self, pose: List[float]):
+        """Move the end-effector to the pose specified as a 1-D list of length 6, representing x, y, z, roll, pitch, yaw in the arm coordinate frame"""
         assert self.manipulator_model is not None
         x, y, z, roll, pitch, yaw = pose
         self.manipulator.arm.set_ee_pose_components(x=x, y=y, z=z, roll=roll, pitch=pitch)
 
-    def get_arm_pose(self)->np.ndarray:
+    def get_arm_pose(self)->List[float]:
         """Gets the current end-effector pose in the arm reference frame"""
         assert self.manipulator_model is not None
         pose_matrix: np.ndarray = self.manipulator.arm.get_ee_pose()
         position = pose_matrix[:3,3].flatten()
         orientation = euler_from_matrix(pose_matrix[:3,:3])
-        return np.array([*position, *orientation])
+        return [*position, *orientation]
 
     def open_gripper(self):
         """Open the gripper"""
@@ -183,8 +183,19 @@ class RobotInterface:
         """Gets the map reference frame"""
         return "map"
 
-    def transform_pose(self, pose: np.ndarray, source_frame: str, target_frame: str)->np.ndarray:
-        """Transform a pose from the source to the target reference frame"""
+    def transform_pose(self, pose: List[float], source_frame: str, target_frame: str)->List[float]:
+        """Transform a pose from the source to the target reference frame."""
+        key2frame = {
+            'map': self.get_map_reference_frame(),
+            'camera': self.get_camera_reference_frame(),
+            'arm': self.get_arm_reference_frame()
+        }
+        for waypoint in self.get_available_waypoints():
+            key2frame[waypoint] = self.get_map_reference_frame()
+        for obj in self.list_detection_classes():
+            key2frame[obj] = self.get_camera_reference_frame()
+        source_frame = key2frame[source_frame]
+        target_frame = key2frame[target_frame]
         ps = PoseStamped()
         ps.header.frame_id = source_frame
         ps.pose.position.x = pose[0]
@@ -209,23 +220,23 @@ class RobotInterface:
             ps.pose.orientation.w,
         ]
         orientation = euler_from_quaternion(quat)
-        return np.array([*position, *orientation])
+        return [*position, *orientation]
 
-    def object_detection_3d(self, class_name: str)->Tuple[List[np.ndarray]]:
-        """Performs 3d object detection, given a class name. Returns a tuple of ([xyz_centroid_position_as_np_array, ...], [xyz_point_cloud_as_np_array, ...]). Poses are in the camera reference frame."""
+    def object_detection_3d(self, class_name: str)->Tuple[List[List[float]],List[List[List[float]]]]:
+        """Performs 3d object detection, given a class name. Returns a tuple of ([xyz_centroid_position_as_list, ...], [xyz_point_cloud_as_list, ...]). Poses are in the camera reference frame."""
         if class_name not in self.list_detection_classes():
             self.add_detection_class(class_name=class_name)
         rospy.wait_for_message(self.recognitions3d_sub.name, Recognitions3D)
         descriptions = filter(lambda e: e.label, self.recognitions3d_msg.descriptions)
-        positions = [np.array([description.bbox.center.position.x, description.bbox.center.position.y, description.bbox.center.position.z]) for description in descriptions]
+        positions = [[description.bbox.center.position.x, description.bbox.center.position.y, description.bbox.center.position.z] for description in descriptions]
         clouds = []
         for description in descriptions:
             cloud = ros_numpy.numpify(description.filtered_cloud)
-            clouds.append(np.array(list(zip(
+            clouds.append(list(zip(
                 cloud['x'],
                 cloud['y'],
                 cloud['z']
-            ))))
+            )))
         return positions, clouds
 
     def list_detection_classes(self)->List[str]:
