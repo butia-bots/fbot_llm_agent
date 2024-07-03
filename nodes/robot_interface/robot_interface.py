@@ -1,6 +1,7 @@
 from langchain_core.tools import StructuredTool
 from butia_vision_msgs.srv import ListClasses, ListClassesRequest, ListClassesResponse
 from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
+from butia_vision_msgs.srv import LookAtDescription3D, LookAtDescription3DRequest, LookAtDescription3DResponse
 from butia_vision_msgs.msg import Description3D, Recognitions3D
 from butia_world_msgs.srv import GetPose, GetPoseRequest, GetPoseResponse
 from butia_speech.srv import SynthesizeSpeech, SynthesizeSpeechRequest, SynthesizeSpeechResponse
@@ -12,7 +13,8 @@ from tf import TransformListener
 from tf.transformations import quaternion_from_euler, euler_from_quaternion, euler_from_matrix
 from geometry_msgs.msg import PoseStamped
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Empty
+import std_srvs
 from actionlib.simple_action_client import SimpleActionClient
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from sensor_msgs.msg import Image
@@ -20,6 +22,7 @@ from maestro.visualizers import MarkVisualizer
 import supervision as sv
 import math
 from transformers import Tool
+from threading import Thread, Event
 
 class RobotInterface:
     def __init__(self, manipulator_model="doris_arm"):
@@ -32,30 +35,137 @@ class RobotInterface:
 
         self.neck_pub = rospy.Publisher("neck", Float64MultiArray, queue_size=1)
 
+        self.look_at_start_proxy = rospy.ServiceProxy("/lookat_start", LookAtDescription3D)
+        self.look_at_stop_proxy = rospy.ServiceProxy("/lookat_stop", std_srvs.Empty)
+
         self.list_classes_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/list_classes', ListClasses)
         self.set_class_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/set_class', SetClass)
         self.recognitions3d_sub = rospy.Subscriber('/butia_vision/br/object_recognition3d', Recognitions3D, callback=self._update_recognitions3d)
         self.image_subscriber = rospy.Subscriber('/butia_vision/bvb/image_rgb', Image, callback=self._update_image_rgb)
 
+        self.start_tracking_proxy = rospy.ServiceProxy('/butia_vision/pt/start', std_srvs.srv.Empty)
+        self.tracking3d_sub = rospy.Subscriber('/butia_vision/pt/tracking3D', Recognitions3D, callback=self._update_tracking3d)
+        self.tracking_rate = rospy.Rate(1.0)
+
         self.synthesize_speech_proxy = rospy.ServiceProxy('/butia_speech/ss/say_something', SynthesizeSpeech)
+
+        self.hotword_event = Event()
+        self.hotword_rate = rospy.Rate(0.5)
+        self.hotword_subscriber = rospy.Subscriber('/butia_speech/bhd/detected', Empty, self._detect_hotword)
 
         self.get_waypoint_proxy = rospy.ServiceProxy('/butia_world/get_pose', GetPose)
 
+        self.guide_rate = rospy.Rate(0.1)
+
         self.tfl = TransformListener()
 
-        self.neck_pub.publish(data=[180.0, 180.0])
+        self.set_neck_angle(180, 180)
+
+    def _detect_hotword(self, msg):
+        self.hotword_event.set()
+        self.hotword_rate.sleep()
+        self.hotword_event.clear()
 
     def _update_recognitions3d(self, msg: Recognitions3D):
         self.recognitions3d_msg = msg
 
+    def _update_tracking3d(self, msg: Recognitions3D):
+        self.tracking3d_msg = msg
+
     def _update_image_rgb(self, msg: Image):
         self.image_rgb_msg = msg
 
+    def start_looking_at_person(self):
+        req = LookAtDescription3DRequest()
+        req.global_id = 0
+        req.id = 0
+        req.recognitions3d_topic = self.tracking3d_sub.name
+        req.label = ''
+        self.look_at_start_proxy.call(req)
+
+    def stop_looking_at(self):
+        self.look_at_stop_proxy.call()
+
+    def set_neck_angle(self, horizontal: float, vertical: float):
+        self.neck_pub.publish(data=[horizontal, vertical])
+
     def speak(self, utterance: str):
+        """Uses a TTS engine to speak"""
         req = SynthesizeSpeechRequest()
         req.lang = 'en'
         req.text = utterance
         res: SynthesizeSpeechResponse = self.synthesize_speech_proxy.call(req)
+
+    def person_tracking_3d(self)->Tuple[List[List[float]],List[List[List[float]]]]:
+        rospy.wait_for_message(self.tracking3d_sub.name, Recognitions3D)
+        descriptions = filter(lambda e: e.label, self.tracking3d_msg.descriptions)
+        positions = [[description.bbox.center.position.x, description.bbox.center.position.y, description.bbox.center.position.z] for description in descriptions]
+        clouds = []
+        for description in descriptions:
+            cloud = ros_numpy.numpify(description.filtered_cloud)
+            clouds.append(list(zip(
+                cloud['x'],
+                cloud['y'],
+                cloud['z']
+            )))
+        return positions, clouds
+
+    def approach_position(self, position: List[float], offset=1.5, blocking=True):
+        current_pose = self.get_mobile_base_pose()
+        current_yaw = current_pose[5]
+        x = position[0] - current_pose[0]
+        y = position[1] - current_pose[1]
+        yaw = current_yaw + math.atan2(y, x)
+        x = position[0] - offset*math.cos(yaw)
+        y = position[1] - offset*math.sin(yaw)
+        self.move_mobile_base([x, y, 0.0, 0.0, 0.0, yaw], blocking=blocking)
+
+    def rotate(self, angle):
+        pose = self.get_mobile_base_pose()
+        pose[5] += angle
+        self.move_mobile_base(pose)
+
+    def follow(self, person_position: List[float]):
+        """Follows the person at the given person_position. The reference frame for the person_position must be the map reference frame."""
+        self.approach_position(person_position, offset=1.5, blocking=True)
+        self.speak("Please, come to me and stand one and a half meters in front of me.")
+        self.speak("I will follow you, I have a important instruction for you, say Hello DoRIS to make me stop when you arrived in the next waypoint")
+        self.start_tracking_proxy.call()
+        self.start_looking_at_person()
+        def check_stop_following():
+            self.hotword_event.wait()
+        hotword_thread = Thread(target=check_stop_following)
+        hotword_thread.start()
+        while hotword_thread.is_alive():
+            person_positions, person_clouds = self.person_tracking_3d()
+            if len(person_positions) == 0:
+                self.rotate(math.radians(45))
+            person_position = person_positions[0]
+            self.approach_position(person_position, offset=1.5, blocking=False)
+            self.tracking_rate.sleep()
+        self.cancel_move_mobile_base()
+        self.stop_looking_at()
+
+    def guide(self, person_position: List[float], destination_waypoint_pose: List[float]):
+        """Guides the person at the given person_position to the given destination_waypoint_pose. the person_position and the destination_waypoint_pose must be on the map reference frame."""
+        self.approach_position(person_position, offset=1.5, blocking=True)
+        self.speak("Please follow me, I will take you to the destination. Keep 1.5 meters behind me, I will turn every 10 seconds to check if you are still following me.")
+        while math.dist(destination_waypoint_pose[:3], self.get_mobile_base_pose()[:3]) > 1.0:
+            self.move_mobile_base(destination_waypoint_pose, blocking=False)
+            self.guide_rate.sleep()
+            self.cancel_move_mobile_base()
+            self.rotate(math.radians(180))
+            person_positions, person_clouds = self.object_detection_3d(class_name="person")
+            person_poses = [self.transform_pose([*p, 0.0, 0.0, 0.0], source_frame='camera', target_frame='map') for p in person_positions]
+            person_poses = [p for p in person_poses if math.dist(p[:3], self.get_mobile_base_pose()[:3]) <= 1.5]
+            if len(person_poses) == 0:
+                self.speak("You are getting lost! Please return to follow me, so that I can finish my task.")
+                while len(person_poses) == 0:
+                    person_positions, person_clouds = self.object_detection_3d(class_name="person")
+                    person_poses = [self.transform_pose([*p, 0.0, 0.0, 0.0], source_frame='camera', target_frame='map') for p in person_positions]
+                    person_poses = [p for p in person_poses if math.dist(p[:3], self.get_mobile_base_pose()[:3]) <= 1.5]
+            self.rotate(math.radians(180))
+        self.speak("We have arrived at the destination, you can now stop following me.")
 
     def annotate_camera_view(self):
         image_rgb = self.image_rgb_msg
@@ -102,6 +212,9 @@ class RobotInterface:
         self.tfl.waitForTransform(self.get_map_reference_frame(), "base_footprint", rospy.Time(), rospy.Duration(10.0))
         translation, rotation = self.tfl.lookupTransform(self.get_map_reference_frame(), "base_footprint", rospy.Time())
         return [*translation, euler_from_quaternion(rotation)]
+
+    def cancel_move_mobile_base(self):
+        self.move_base_client.cancel_goal()
     
     def move_mobile_base(self, pose: List[float], blocking: bool=True):
         """Navigates the mobile base to the given pose in the map reference frame, given as a x, y, z, roll, pitch, yaw list. Only the x, y, and yaw values are used."""
@@ -138,13 +251,16 @@ class RobotInterface:
         self.move_arm(pose=grasp_pose)
         self.close_gripper()
         self.move_arm(pose=post_grasp_pose)
+        self.retreat_arm()
 
     def place(self, place_pose: List[float]):
         """Executes a placement at the given place pose. The place pose must be in the arm reference frame"""
-        place_pose = place_pose.compy()
-        place_pose[2] += 0.2
+        pre_place_pose = place_pose.copy()
+        pre_place_pose[2] += 0.2
+        self.move_arm(pose=pre_place_pose)
         self.move_arm(pose=place_pose)
         self.open_gripper()
+        self.retreat_arm()
     
     def move_arm(self, pose: List[float]):
         """Move the end-effector to the pose specified as a 1-D list of length 6, representing x, y, z, roll, pitch, yaw in the arm coordinate frame"""
@@ -194,8 +310,10 @@ class RobotInterface:
             key2frame[waypoint] = self.get_map_reference_frame()
         for obj in self.list_detection_classes():
             key2frame[obj] = self.get_camera_reference_frame()
-        source_frame = key2frame[source_frame]
-        target_frame = key2frame[target_frame]
+        if source_frame in key2frame:
+            source_frame = key2frame[source_frame]
+        if target_frame in key2frame:
+            target_frame = key2frame[target_frame]
         ps = PoseStamped()
         ps.header.frame_id = source_frame
         ps.pose.position.x = pose[0]
@@ -259,6 +377,7 @@ class RobotInterface:
             StructuredTool.from_function(self.open_gripper, name='open_gripper'),
             StructuredTool.from_function(self.close_gripper, name='close_gripper'),
             StructuredTool.from_function(self.grasp, name="grasp"),
+            StructuredTool.from_function(self.place, name="place"),
             StructuredTool.from_function(self.object_detection_3d, name="object_detection_3d"),
             StructuredTool.from_function(self.list_detection_classes, name="list_object_detection_classes"),
             StructuredTool.from_function(self.get_camera_reference_frame, name='get_camera_reference_frame'),
@@ -268,6 +387,9 @@ class RobotInterface:
             StructuredTool.from_function(self.get_available_waypoints, name='get_available_waypoints'),
             StructuredTool.from_function(self.get_waypoint_pose, name="get_waypoint_pose"),
             StructuredTool.from_function(self.transform_pose, name='transform_pose'),
+            StructuredTool.from_function(self.follow, name='follow'),
+            StructuredTool.from_function(self.guide, name='guide'),
+            StructuredTool.from_function(self.speak, 'speak')
         ]
 
     def get_code_tools_hf(self):
