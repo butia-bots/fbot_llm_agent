@@ -7,33 +7,55 @@ from butia_world_msgs.srv import GetPose, GetPoseRequest, GetPoseResponse
 from butia_speech.srv import SynthesizeSpeech, SynthesizeSpeechRequest, SynthesizeSpeechResponse
 import rospy
 from typing import List, Tuple
-import numpy as np
 import ros_numpy
 from tf import TransformListener
 from tf.transformations import quaternion_from_euler, euler_from_quaternion, euler_from_matrix
 from geometry_msgs.msg import PoseStamped
-from interbotix_xs_modules.arm import InterbotixManipulatorXS
-from std_msgs.msg import Float64MultiArray, Empty
+from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest, GetPositionIKResponse
+from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest, GetPositionFKResponse
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray, Empty, Float64
 import std_srvs
 from actionlib.simple_action_client import SimpleActionClient
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from sensor_msgs.msg import Image
-from maestro.visualizers import MarkVisualizer
-import supervision as sv
 import math
 from transformers import Tool
 from threading import Thread, Event
 
+class RobotTool(Tool):
+    def from_function(function, name, output_type):
+        t = RobotTool()
+        t.__call__ = function
+        t.name = name
+        t.description = function.__doc__
+        t.output_type = output_type
+        return t
+
 class RobotInterface:
-    def __init__(self, manipulator_model="doris_arm"):
+    arm_joint_names = ["waist", "shoulder", "elbow", "wrist_angle", "wrist_rotate"]
+    arm_sleep_joint_positions = [0, -1.88, 1.5, 0.8, 0, 0]
+    gripper_joint_names = ["left_finger", "right_finger"]
+    gripper_open_joint_positions = [0.037, -0.037]
+    gripper_close_joint_positions = [0.015, -0.015]
+
+    def __init__(self, manipulator_model="doris_arm", arm_group_name="arm", arm_controller_ns="arm", gripper_controller_ns="gripper"):
         self.manipulator_model = manipulator_model
 
         if self.manipulator_model != None:
-            self.manipulator = InterbotixManipulatorXS(robot_model=self.manipulator_model, init_node=False)
+            self.arm_group_name = arm_group_name
+            self.compute_ik_proxy = rospy.ServiceProxy(f'/{self.manipulator_model}/move_group/compute_ik', GetPositionIK)
+            self.compute_fk_proxy = rospy.ServiceProxy(f'/{self.manipulator_model}/move_group/compute_fk', GetPositionFK)
+            self.arm_publisher = rospy.Publisher(f'/{arm_controller_ns}/command', JointTrajectory, queue_size=1)
+            self.gripper_publisher = rospy.Publisher(f'/{gripper_controller_ns}/command', JointTrajectory, queue_size=1)
+            self.joint_state_subscriber = rospy.Subscriber(f'/{arm_controller_ns}/state', JointState, self._update_joint_state)
 
         self.move_base_client = SimpleActionClient("move_base", MoveBaseAction)
 
         self.neck_pub = rospy.Publisher("neck", Float64MultiArray, queue_size=1)
+        self.head_pan_pub = rospy.Publisher("/doris_head/head_pan_position_controller/command", Float64, queue_size=1)
+        self.head_tilt_pub = rospy.Publisher("/doris_head/head_tilt_position_controller/command", Float64, queue_size=1)
 
         self.look_at_start_proxy = rospy.ServiceProxy("/lookat_start", LookAtDescription3D)
         self.look_at_stop_proxy = rospy.ServiceProxy("/lookat_stop", std_srvs.Empty)
@@ -61,6 +83,9 @@ class RobotInterface:
 
         self.set_neck_angle(180, 180)
 
+    def _update_joint_state(self, msg: JointState):
+        self.joint_state_msg = msg
+
     def _detect_hotword(self, msg):
         self.hotword_event.set()
         self.hotword_rate.sleep()
@@ -81,20 +106,96 @@ class RobotInterface:
         req.id = 0
         req.recognitions3d_topic = self.tracking3d_sub.name
         req.label = ''
-        self.look_at_start_proxy.call(req)
+        try:
+            self.look_at_start_proxy.call(req)
+        except:
+            pass
 
     def stop_looking_at(self):
-        self.look_at_stop_proxy.call()
+        try:
+            self.look_at_stop_proxy.call()
+        except:
+            pass
 
     def set_neck_angle(self, horizontal: float, vertical: float):
         self.neck_pub.publish(data=[horizontal, vertical])
+        self.head_pan_pub.publish(data=math.radians(horizontal - 180))
+        self.head_tilt_pub.publish(data=math.radians(vertical - 180))
+
+    def compute_ik(self, pose: List[float])->List[float]:
+        req = GetPositionIKRequest()
+        req.ik_request.group_name = self.arm_group_name
+        req.ik_request.pose_stamped.header.frame_id = f'{self.manipulator_model}/base_link'
+        req.ik_request.pose_stamped.pose.position.x = pose[0]
+        req.ik_request.pose_stamped.pose.position.y = pose[1]
+        req.ik_request.pose_stamped.pose.position.z = pose[2]
+        quat = quaternion_from_euler(pose[3], pose[4], pose[5])
+        req.ik_request.pose_stamped.pose.orientation.x = quat[0]
+        req.ik_request.pose_stamped.pose.orientation.y = quat[1]
+        req.ik_request.pose_stamped.pose.orientation.z = quat[2]
+        req.ik_request.pose_stamped.pose.orientation.w = quat[3]
+        res: GetPositionIKResponse = self.compute_ik_proxy.call(req)
+        joints = []
+        for name, position in zip(res.solution.joint_state.name, res.solution.joint_state.position):
+            if name in self.arm_joint_names:
+                joints.append(position)
+        return joints
+    
+    def set_arm_joints(self, joints: List[float]):
+        jt = JointTrajectory()
+        jt.joint_names = self.arm_joint_names
+        jtp = JointTrajectoryPoint()
+        jtp.positions = joints
+        jtp.time_from_start = rospy.Duration(1.0)
+        jt.points.append(jtp)
+        self.arm_publisher.publish(jt)
+
+    def set_gripper_joints(self, joints: List[float]):
+        jt = JointTrajectory()
+        jt.joint_names = self.gripper_joint_names
+        jtp = JointTrajectoryPoint()
+        jtp.positions = joints
+        jtp.time_from_start = rospy.Duration(1.0)
+        jt.points.append(jtp)
+        self.gripper_publisher.publish(jt)
+
+    def compute_fk(self, joints: List[float])->List[float]:
+        req = GetPositionFKRequest()
+        req.fk_link_names = [f'{self.manipulator_model}/ee_gripper_link']
+        req.robot_state.joint_state.name = self.arm_joint_names
+        req.robot_state.joint_state.position = joints
+        res: GetPositionFKResponse = self.compute_fk_proxy.call(req)
+        position = [
+            res.pose_stamped[0].pose.position.x,
+            res.pose_stamped[0].pose.position.y,
+            res.pose_stamped[0].pose.position.z
+        ]
+        quat = [
+            res.pose_stamped[0].pose.orientation.x,
+            res.pose_stamped[0].pose.orientation.y,
+            res.pose_stamped[0].pose.orientation.z,
+            res.pose_stamped[0].pose.orientation.w
+        ]
+        orientation = euler_from_quaternion(quat)
+        return [*position, *orientation]
+    
+    def get_arm_joints(self)->List[float]:
+        rospy.wait_for_message(self.joint_state_subscriber.name, JointState)
+        joints = []
+        for name, position in zip(self.joint_state_msg.name, self.joint_state_msg.position):
+            if name in self.arm_joint_names:
+                joints.append(position)
+        return joints
 
     def speak(self, utterance: str):
         """Uses a TTS engine to speak"""
         req = SynthesizeSpeechRequest()
         req.lang = 'en'
         req.text = utterance
-        res: SynthesizeSpeechResponse = self.synthesize_speech_proxy.call(req)
+        try:
+            res: SynthesizeSpeechResponse = self.synthesize_speech_proxy.call(req)
+        except:
+            pass
 
     def person_tracking_3d(self)->Tuple[List[List[float]],List[List[List[float]]]]:
         rospy.wait_for_message(self.tracking3d_sub.name, Recognitions3D)
@@ -167,23 +268,6 @@ class RobotInterface:
             self.rotate(math.radians(180))
         self.speak("We have arrived at the destination, you can now stop following me.")
 
-    def annotate_camera_view(self):
-        image_rgb = self.image_rgb_msg
-        recognitions = self.recognitions3d_msg
-        image_arr = ros_numpy.numpify(image_rgb)
-        visualizer = MarkVisualizer()
-        xyxy = []
-        for description in recognitions.descriptions:
-            x1 = description.bbox2D.center.x - (description.bbox2D.size_x/2.0)
-            y1 = description.bbox2D.center.y - (description.bbox2D.size_y/2.0)
-            x2 = description.bbox2D.center.x + (description.bbox2D.size_x/2.0)
-            y2 = description.bbox2D.center.y + (description.bbox2D.size_y/2.0)
-            xyxy.append([x1,y1,x2,y2])
-        xyxy = np.array(xyxy)
-        marks = sv.Detections(xyxy=xyxy)
-        annotated_image_arr = visualizer.visualize(image=image_arr, marks=marks, with_box=True, with_polygon=False)
-        return recognitions, annotated_image_arr
-
     def get_available_waypoints(self)->List[str]:
         """Gets the names of the available waypoints in the map"""
         return rospy.get_param('/butia_world/pose/targets', {}).keys()
@@ -236,7 +320,7 @@ class RobotInterface:
 
     def retreat_arm(self):
         assert self.manipulator_model is not None
-        self.manipulator.arm.go_to_home_pose()
+        self.set_arm_joints(self.arm_sleep_joint_positions)
 
     def grasp(self, grasp_pose: List[float]):
         """Executes a grasp at the given grasp pose. The grasp pose must be in the arm reference frame"""
@@ -266,25 +350,26 @@ class RobotInterface:
         """Move the end-effector to the pose specified as a 1-D list of length 6, representing x, y, z, roll, pitch, yaw in the arm coordinate frame"""
         assert self.manipulator_model is not None
         x, y, z, roll, pitch, yaw = pose
-        self.manipulator.arm.set_ee_pose_components(x=x, y=y, z=z, roll=roll, pitch=pitch)
+        yaw = math.atan2(y, x)
+        joints = self.compute_ik([x, y, z, roll, pitch, yaw])
+        self.set_arm_joints(joints)
 
     def get_arm_pose(self)->List[float]:
         """Gets the current end-effector pose in the arm reference frame"""
         assert self.manipulator_model is not None
-        pose_matrix: np.ndarray = self.manipulator.arm.get_ee_pose()
-        position = pose_matrix[:3,3].flatten()
-        orientation = euler_from_matrix(pose_matrix[:3,:3])
-        return [*position, *orientation]
+        joints = self.get_arm_joints()
+        pose = self.compute_fk(joints)
+        return pose
 
     def open_gripper(self):
         """Open the gripper"""
         assert self.manipulator_model is not None
-        self.manipulator.gripper.open()
+        self.set_gripper_joints(self.gripper_open_joint_positions)
 
     def close_gripper(self):
         """Close the gripper"""
         assert self.manipulator_model is not None
-        self.manipulator.gripper.close()
+        self.set_gripper_joints(self.gripper_close_joint_positions)
 
     def get_arm_reference_frame(self)->str:
         """Gets the arm reference frame"""
@@ -393,4 +478,24 @@ class RobotInterface:
         ]
 
     def get_code_tools_hf(self):
-        return [Tool.from_langchain(t) for t in self.get_code_tools_langchain()]
+        return [
+            RobotTool.from_function(self.move_arm, name='move_arm', output_type=None),
+            RobotTool.from_function(self.get_arm_pose, name='get_arm_pose', output_type=List[float]),
+            RobotTool.from_function(self.get_arm_reference_frame, name='get_arm_reference_frame', output_type=str),
+            RobotTool.from_function(self.open_gripper, name='open_gripper', output_type=None),
+            RobotTool.from_function(self.close_gripper, name='close_gripper', output_type=None),
+            RobotTool.from_function(self.grasp, name="grasp", output_type=None),
+            RobotTool.from_function(self.place, name="place", output_type=None),
+            RobotTool.from_function(self.object_detection_3d, name="object_detection_3d", output_type=Tuple[List[List[float]], List[List[List[float]]]]),
+            RobotTool.from_function(self.list_detection_classes, name="list_object_detection_classes", output_type=List[str]),
+            RobotTool.from_function(self.get_camera_reference_frame, name='get_camera_reference_frame', output_type=str),
+            RobotTool.from_function(self.move_mobile_base, name="move_mobile_base", output_type=None),
+            RobotTool.from_function(self.get_mobile_base_pose, name='get_mobile_base_pose', output_type=List[float]),
+            RobotTool.from_function(self.get_map_reference_frame, name="get_map_reference_frame", output_type=str),
+            RobotTool.from_function(self.get_available_waypoints, name='get_available_waypoints', output_type=List[str]),
+            RobotTool.from_function(self.get_waypoint_pose, name="get_waypoint_pose", output_type=List[float]),
+            RobotTool.from_function(self.transform_pose, name='transform_pose', output_type=List[float]),
+            RobotTool.from_function(self.follow, name='follow', output_type=None),
+            RobotTool.from_function(self.guide, name='guide', output_type=None),
+            RobotTool.from_function(self.speak, 'speak', output_type=None)
+        ]
