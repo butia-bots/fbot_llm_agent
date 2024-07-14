@@ -14,7 +14,7 @@ class OllamaEngine:
         self.model = model
 
     def __call__(self, messages, stop_sequences=['Task',]) -> Any:
-        return self.client.chat.completions.create(messages=messages, model=self.model, stop=stop_sequences).choices[0].message.content
+        return self.client.chat.completions.create(messages=messages, model=self.model, stop=stop_sequences, temperature=0).choices[0].message.content
 
 def handle_execute_tasks(req: ExecuteTasksRequest):
     for task_msg in req.task_list:
@@ -24,8 +24,9 @@ def handle_execute_tasks(req: ExecuteTasksRequest):
 
 if __name__ == '__main__':
     rospy.init_node('hf_react_code_agent_node', anonymous=True)
-    robot_interface = RobotInterface(manipulator_model="wx200", arm_group_name="interbotix_arm", arm_controller_ns="interbotix_arm_controller", gripper_controller_ns="interbotix_gripper_controller")
-    llm_engine = OllamaEngine(model="deepseek-coder-v2")
+    #robot_interface = RobotInterface(manipulator_model="wx200", arm_group_name="interbotix_arm", arm_controller_ns="interbotix_arm_controller", gripper_controller_ns="interbotix_gripper_controller")
+    robot_interface = RobotInterface()
+    llm_engine = OllamaEngine(model="llama3")
     agent = ReactCodeAgent(tools=robot_interface.get_code_tools_hf(), llm_engine=llm_engine)
     execute_tasks_server = rospy.Service('/fbot_llm_agent/execute_tasks', ExecuteTasks, handler=handle_execute_tasks)
     rospy.spin()

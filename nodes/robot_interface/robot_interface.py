@@ -1,6 +1,7 @@
 from langchain_core.tools import StructuredTool
 from butia_vision_msgs.srv import ListClasses, ListClassesRequest, ListClassesResponse
 from butia_vision_msgs.srv import SetClass, SetClassRequest, SetClassResponse
+from butia_vision_msgs.srv import VisualQuestionAnswering, VisualQuestionAnsweringRequest, VisualQuestionAnsweringResponse
 from butia_vision_msgs.srv import LookAtDescription3D, LookAtDescription3DRequest, LookAtDescription3DResponse
 from butia_vision_msgs.msg import Description3D, Recognitions3D
 from butia_world_msgs.srv import GetPose, GetPoseRequest, GetPoseResponse
@@ -16,7 +17,7 @@ from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest, GetPositionFKRe
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray, Empty, Float64
-import std_srvs
+from std_srvs.srv import Empty as EmptySrv
 from actionlib.simple_action_client import SimpleActionClient
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from sensor_msgs.msg import Image
@@ -25,13 +26,17 @@ from transformers import Tool
 from threading import Thread, Event
 
 class RobotTool(Tool):
-    def from_function(function, name, output_type):
+    def from_function(function, name, output_type, inputs):
         t = RobotTool()
-        t.__call__ = function
+        t.function = function
         t.name = name
         t.description = function.__doc__
+        t.inputs = inputs
         t.output_type = output_type
         return t
+
+    def __call__(self, *args, **kwargs):
+        return self.function(*args, **kwargs)
 
 class RobotInterface:
     arm_joint_names = ["waist", "shoulder", "elbow", "wrist_angle", "wrist_rotate"]
@@ -40,16 +45,16 @@ class RobotInterface:
     gripper_open_joint_positions = [0.037, -0.037]
     gripper_close_joint_positions = [0.015, -0.015]
 
-    def __init__(self, manipulator_model="doris_arm", arm_group_name="arm", arm_controller_ns="arm", gripper_controller_ns="gripper"):
+    def __init__(self, manipulator_model="doris_arm", arm_group_name="arm", arm_controller_ns="/doris_arm/arm_controller/command", gripper_controller_ns="/doris_arm/gripper_controller/command", arm_joint_state="/doris_arm/joint_state"):
         self.manipulator_model = manipulator_model
 
         if self.manipulator_model != None:
             self.arm_group_name = arm_group_name
             self.compute_ik_proxy = rospy.ServiceProxy(f'/{self.manipulator_model}/move_group/compute_ik', GetPositionIK)
             self.compute_fk_proxy = rospy.ServiceProxy(f'/{self.manipulator_model}/move_group/compute_fk', GetPositionFK)
-            self.arm_publisher = rospy.Publisher(f'/{arm_controller_ns}/command', JointTrajectory, queue_size=1)
-            self.gripper_publisher = rospy.Publisher(f'/{gripper_controller_ns}/command', JointTrajectory, queue_size=1)
-            self.joint_state_subscriber = rospy.Subscriber(f'/{arm_controller_ns}/state', JointState, self._update_joint_state)
+            self.arm_publisher = rospy.Publisher(arm_controller_ns, JointTrajectory, queue_size=1)
+            self.gripper_publisher = rospy.Publisher(gripper_controller_ns, JointTrajectory, queue_size=1)
+            self.joint_state_subscriber = rospy.Subscriber(arm_joint_state, JointState, self._update_joint_state)
 
         self.move_base_client = SimpleActionClient("move_base", MoveBaseAction)
 
@@ -58,14 +63,15 @@ class RobotInterface:
         self.head_tilt_pub = rospy.Publisher("/doris_head/head_tilt_position_controller/command", Float64, queue_size=1)
 
         self.look_at_start_proxy = rospy.ServiceProxy("/lookat_start", LookAtDescription3D)
-        self.look_at_stop_proxy = rospy.ServiceProxy("/lookat_stop", std_srvs.Empty)
+        self.look_at_stop_proxy = rospy.ServiceProxy("/lookat_stop", EmptySrv)
 
         self.list_classes_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/list_classes', ListClasses)
         self.set_class_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/set_class', SetClass)
         self.recognitions3d_sub = rospy.Subscriber('/butia_vision/br/object_recognition3d', Recognitions3D, callback=self._update_recognitions3d)
         self.image_subscriber = rospy.Subscriber('/butia_vision/bvb/image_rgb', Image, callback=self._update_image_rgb)
+        self.vqa_proxy = rospy.ServiceProxy('/butia_vision/br/object_recognition/visual_question_answering', VisualQuestionAnswering)
 
-        self.start_tracking_proxy = rospy.ServiceProxy('/butia_vision/pt/start', std_srvs.srv.Empty)
+        self.start_tracking_proxy = rospy.ServiceProxy('/butia_vision/pt/start', EmptySrv)
         self.tracking3d_sub = rospy.Subscriber('/butia_vision/pt/tracking3D', Recognitions3D, callback=self._update_tracking3d)
         self.tracking_rate = rospy.Rate(1.0)
 
@@ -149,6 +155,7 @@ class RobotInterface:
         jtp.time_from_start = rospy.Duration(1.0)
         jt.points.append(jtp)
         self.arm_publisher.publish(jt)
+        rospy.Rate(1.0).sleep()
 
     def set_gripper_joints(self, joints: List[float]):
         jt = JointTrajectory()
@@ -158,6 +165,7 @@ class RobotInterface:
         jtp.time_from_start = rospy.Duration(1.0)
         jt.points.append(jtp)
         self.gripper_publisher.publish(jt)
+        rospy.Rate(1.0).sleep()
 
     def compute_fk(self, joints: List[float])->List[float]:
         req = GetPositionFKRequest()
@@ -247,6 +255,14 @@ class RobotInterface:
         self.cancel_move_mobile_base()
         self.stop_looking_at()
 
+    def follow_person_by_description(self, person_description: str, waypoint_name: str):
+        """Follows the person with the given description"""
+        self.navigate_to_waypoint(waypoint_name=waypoint_name)
+        person_positions, person_clouds = self.object_detection_3d(class_name=person_description)
+        if len(person_positions) == 0:
+            return
+        self.follow(self.transform_pose(person_positions[0]+[0,0,0], 'camera', 'map'))
+
     def guide(self, person_position: List[float], destination_waypoint_pose: List[float]):
         """Guides the person at the given person_position to the given destination_waypoint_pose. the person_position and the destination_waypoint_pose must be on the map reference frame."""
         self.approach_position(person_position, offset=1.5, blocking=True)
@@ -267,6 +283,14 @@ class RobotInterface:
                     person_poses = [p for p in person_poses if math.dist(p[:3], self.get_mobile_base_pose()[:3]) <= 1.5]
             self.rotate(math.radians(180))
         self.speak("We have arrived at the destination, you can now stop following me.")
+
+    def guide_person_by_description(self, person_description: str, start_waypoint_name: str, destination_waypoint_name: str):
+        """Guides the person with the given description"""
+        self.navigate_to_waypoint(waypoint_name=start_waypoint_name)
+        person_positions, person_clouds = self.object_detection_3d(class_name=person_description)
+        if len(person_positions) == 0:
+            return
+        self.guide(self.transform_pose(person_positions[0]+[0,0,0], 'camera', 'map'), self.get_waypoint_pose(destination_waypoint_name))
 
     def get_available_waypoints(self)->List[str]:
         """Gets the names of the available waypoints in the map"""
@@ -337,6 +361,15 @@ class RobotInterface:
         self.move_arm(pose=post_grasp_pose)
         self.retreat_arm()
 
+    def grasp_object(self, class_name: str, waypoint_name: str):
+        """Grasps the object of the given class name"""
+        self.navigate_to_waypoint(waypoint_name=waypoint_name)
+        positions, clouds = self.object_detection_3d(class_name)
+        if len(positions) == 0:
+            return
+        grasp_pose = positions[0]
+        self.grasp(self.transform_pose(grasp_pose, 'camera', 'arm'))
+
     def place(self, place_pose: List[float]):
         """Executes a placement at the given place pose. The place pose must be in the arm reference frame"""
         pre_place_pose = place_pose.copy()
@@ -345,6 +378,15 @@ class RobotInterface:
         self.move_arm(pose=place_pose)
         self.open_gripper()
         self.retreat_arm()
+
+    def place_on_surface(self, surface_class_name: str, waypoint_name: str):
+        """Places the object on the surface of the given class name"""
+        self.navigate_to_waypoint(waypoint_name=waypoint_name)
+        positions, clouds = self.object_detection_3d(surface_class_name)
+        if len(positions) == 0:
+            return
+        place_pose = positions[0]
+        self.place(self.transform_pose(place_pose, 'camera', 'arm'))
     
     def move_arm(self, pose: List[float]):
         """Move the end-effector to the pose specified as a 1-D list of length 6, representing x, y, z, roll, pitch, yaw in the arm coordinate frame"""
@@ -441,6 +483,17 @@ class RobotInterface:
                 cloud['z']
             )))
         return positions, clouds
+    
+    def visual_question_answering(self, question: str, waypoint_name: str)->str:
+        """Answers a visual question"""
+        self.navigate_to_waypoint(waypoint_name=waypoint_name)
+        req = VisualQuestionAnsweringRequest()
+        req.question = question
+        try:
+            res: VisualQuestionAnsweringResponse = self.vqa_proxy.call(req)
+            return res.answer
+        except:
+            return "I am sorry, I could not answer the question."
 
     def list_detection_classes(self)->List[str]:
         """Gets a list of currently set object detection class names"""
@@ -453,6 +506,13 @@ class RobotInterface:
         req = SetClassRequest()
         req.class_name = class_name
         res: SetClassResponse = self.set_class_proxy.call(req)
+
+    def navigate_to_waypoint(self, waypoint_name: str):
+        """Navigates the robot to the given waypoint"""
+        if waypoint_name not in self.get_available_waypoints():
+            raise ValueError(f"Waypoint {waypoint_name} is not available. The following waypoints are available instead: {self.get_available_waypoints()}")
+        pose = self.get_waypoint_pose(waypoint_name)
+        self.move_mobile_base(pose)
 
     def get_code_tools_langchain(self):
         return [
@@ -479,23 +539,11 @@ class RobotInterface:
 
     def get_code_tools_hf(self):
         return [
-            RobotTool.from_function(self.move_arm, name='move_arm', output_type=None),
-            RobotTool.from_function(self.get_arm_pose, name='get_arm_pose', output_type=List[float]),
-            RobotTool.from_function(self.get_arm_reference_frame, name='get_arm_reference_frame', output_type=str),
-            RobotTool.from_function(self.open_gripper, name='open_gripper', output_type=None),
-            RobotTool.from_function(self.close_gripper, name='close_gripper', output_type=None),
-            RobotTool.from_function(self.grasp, name="grasp", output_type=None),
-            RobotTool.from_function(self.place, name="place", output_type=None),
-            RobotTool.from_function(self.object_detection_3d, name="object_detection_3d", output_type=Tuple[List[List[float]], List[List[List[float]]]]),
-            RobotTool.from_function(self.list_detection_classes, name="list_object_detection_classes", output_type=List[str]),
-            RobotTool.from_function(self.get_camera_reference_frame, name='get_camera_reference_frame', output_type=str),
-            RobotTool.from_function(self.move_mobile_base, name="move_mobile_base", output_type=None),
-            RobotTool.from_function(self.get_mobile_base_pose, name='get_mobile_base_pose', output_type=List[float]),
-            RobotTool.from_function(self.get_map_reference_frame, name="get_map_reference_frame", output_type=str),
-            RobotTool.from_function(self.get_available_waypoints, name='get_available_waypoints', output_type=List[str]),
-            RobotTool.from_function(self.get_waypoint_pose, name="get_waypoint_pose", output_type=List[float]),
-            RobotTool.from_function(self.transform_pose, name='transform_pose', output_type=List[float]),
-            RobotTool.from_function(self.follow, name='follow', output_type=None),
-            RobotTool.from_function(self.guide, name='guide', output_type=None),
-            RobotTool.from_function(self.speak, 'speak', output_type=None)
+            RobotTool.from_function(self.navigate_to_waypoint, name='navigate_to_waypoint', output_type=None, inputs={'waypoint_name': {'type': 'string'}}),
+            RobotTool.from_function(self.follow_person_by_description, name='follow_person_by_description', output_type=None, inputs={'person_description': {'type': 'string'}, 'waypoint_name': {'type': 'string'}}),
+            RobotTool.from_function(self.guide_person_by_description, name='guide_person_by_description', output_type=None, inputs={'person_description': {'type': 'string'}, 'start_waypoint_name': {'type': 'string'}, 'destination_waypoint_name': {'type': 'string'}}),
+            RobotTool.from_function(self.speak, 'speak', output_type=None, inputs={'utterance': {'type': 'string'}}),
+            RobotTool.from_function(self.grasp_object, name='grasp_object', output_type=None, inputs={'class_name': {'type': 'string'}, 'waypoint_name': {'type': 'string'}}),
+            RobotTool.from_function(self.place_on_surface, name='place_on_surface', output_type=None, inputs={'surface_class_name': {'type': 'string'}, 'waypoint_name': {'type': 'string'}}),
+            RobotTool.from_function(self.visual_question_answering, name='visual_question_answering', output_type='string', inputs={'question': {'type': 'string'}, 'waypoint_name': {'type': 'string'}}),
         ]
