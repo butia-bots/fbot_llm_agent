@@ -14,12 +14,13 @@ class OllamaEngine:
         self.model = model
 
     def __call__(self, messages, stop_sequences=['Task',]) -> Any:
-        return self.client.chat.completions.create(messages=messages, model=self.model, stop=stop_sequences, temperature=0).choices[0].message.content
+        return self.client.chat.completions.create(messages=messages, model=self.model, stop=stop_sequences).choices[0].message.content
 
 def handle_execute_tasks(req: ExecuteTasksRequest):
     for task_msg in req.task_list:
-        agent.run(task=task_msg.description)
+        answer = agent.run(task=task_msg.description)
     res = ExecuteTasksResponse()
+    res.response = answer
     return res
 
 if __name__ == '__main__':
