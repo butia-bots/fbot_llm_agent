@@ -26,8 +26,8 @@ def handle_execute_tasks(req: ExecuteTasksRequest):
 if __name__ == '__main__':
     rospy.init_node('hf_react_code_agent_node', anonymous=True)
     #robot_interface = RobotInterface(manipulator_model="wx200", arm_group_name="interbotix_arm", arm_controller_ns="interbotix_arm_controller", gripper_controller_ns="interbotix_gripper_controller")
-    robot_interface = ButiaBehaviorInterface()
-    llm_engine = OllamaEngine(model="llama3")
+    robot_interface = ButiaBehaviorInterface(fake_execution=True)
+    llm_engine = OllamaEngine(model="llama3.1")
     agent = ReactCodeAgent(tools=robot_interface.get_code_tools_hf(), llm_engine=llm_engine)
     execute_tasks_server = rospy.Service('/fbot_llm_agent/execute_tasks', ExecuteTasks, handler=handle_execute_tasks)
     rospy.spin()

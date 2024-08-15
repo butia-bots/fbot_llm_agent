@@ -1,0 +1,30 @@
+fake_execution: true
+planner_examples:
+  - task: Meet William in the kitchen and lead them to the exit
+    steps:
+      - navigate to the kitchen
+      - navigate to William
+      - speak "Hello William, please follow me to the exit"
+      - navigate to the exit
+      - speak "You can stop following me now."
+  - task: Tell me how many standing persons are in the kitchen
+    steps:
+      - navigate to the kitchen
+      - visual question answering "How many standing persons are there?"
+  - task: Tell me how many people in the living room are wearing blue t shirts
+    steps:
+      - navigate to the living room
+      - visual question answering "How many people are wearing blue t shirts?"
+  - task: Meet Sophie at the coffee table then find them in the hallway
+    steps:
+      - navigate to the coffee table
+      - navigate to Sophie
+      - speak "Hello Sophie! I am going to find you in the hallway."
+      - navigate to the hallway
+      - navigate to Sophie
+      - speak "Hello Sophie! I found you!"
+  - task: Follow the person raising their right arm at the hallway cabinet
+    steps:
+      - navigate to the hallway cabinet
+      - navigate to the person raising their right arm
+      - follow the person

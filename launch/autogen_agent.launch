@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="fbot_llm_agent" type="autogen_agent_node.py" name="autogen_agent_node" output="screen">
+        <rosparam file="$(find fbot_llm_agent)/config/autogen_agent.yaml" command="load" />
+    </node>
+</launch>
