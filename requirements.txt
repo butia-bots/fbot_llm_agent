@@ -2,3 +2,4 @@ maestro
 langchain
 transformers
 supervision
+pyautogen
