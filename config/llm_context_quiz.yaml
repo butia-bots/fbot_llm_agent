@@ -1,0 +1,3 @@
+llm_api_type: google
+#llm_api_base_url: http://localhost:11434
+llm_model: gemma2:2b-instruct-q5_1

@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<launch>
+    <node pkg="fbot_llm_agent" type="llm_context_quiz_node.py" name="llm_context_quiz_node" output="screen">
+        <rosparam file="$(find fbot_llm_agent)/config/llm_context_quiz_node.yaml" command="load" />
+    </node>
+</launch>
