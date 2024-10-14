@@ -14,6 +14,7 @@ config_list = [
     "api_type": "ollama",
     "model": "llama3",
     "client_host": "http://jetson:11434",
+    "native_tool_calls": False,
     #"api_key": "ollama",
   }
 ]
