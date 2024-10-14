@@ -1,4 +1,4 @@
-fake_execution: true
+fake_execution: false
 planner_examples:
   - task: Meet William in the kitchen and lead them to the exit
     steps:
