@@ -11,7 +11,7 @@ robot_interface = ButiaBehaviorInterface(fake_execution=config['fake_execution']
 
 config_list = [
   {
-    "model": "llama3.1",
+    "model": "llama3",
     "base_url": "http://jetson:11434/v1",
     "api_key": "ollama",
   }
