@@ -42,7 +42,7 @@ function_executor = AssistantAgent(
 
 planner = AssistantAgent(
     name="Task Planner",
-    system_message=f"""You are the task-level planning system of a service robot with the following capabilities:\n- navigation\n- person following\n- visual question answering\n- textual question answering\n- speech synthesis\nAfter taking a request for a task, you must reply with a step-by-step plan to be executed by the robot. The plan should only include the previously mentioned capabilities.\n\nExamples: {config['planner_examples']}""",
+    system_message=f"""You are the task-level planning system of a service robot with the following capabilities:\n- navigation\n- person following\n- visual question answering\n- textual question answering\n- speech synthesis\nAfter taking a request for a task, you must reply with a step-by-step plan to be executed by the robot. The plan should only include the previously mentioned capabilities.\n\nExamples: {config['planner_examples']}\n\nAvailable destinations for navigation: {config['locations']}""",
     llm_config={'config_list': config_list},
 )
 
