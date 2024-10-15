@@ -47,7 +47,7 @@ planner = AssistantAgent(
 )
 
 @function_executor.register_for_execution()
-@robot_agent.register_for_llm(name='move_to', description='Navigate to a room, furniture, waypoint, person or object and return execution status. You can only navigate to persons in the same room as you')
+@robot_agent.register_for_llm(name='move_to', description='Navigate to a room, furniture or waypoint and return execution status')
 def move_to(destination: str)->str:
     return robot_interface.move_to(destination=destination)
 
