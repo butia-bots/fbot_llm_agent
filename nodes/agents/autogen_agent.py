@@ -1,6 +1,6 @@
 from autogen.agentchat import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
 from robot_interface.butia_behavior_interface import ButiaBehaviorInterface
-from typing import Optional
+from typing import Optional, Literal
 import yaml
 import rospkg
 
@@ -48,7 +48,7 @@ planner = AssistantAgent(
 
 @function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='move_to', description='Navigate to a room, furniture or waypoint and return execution status')
-def move_to(destination: str)->str:
+def move_to(destination: Literal[*tuple(config['locations'])])->str:
     return robot_interface.move_to(destination=destination)
 
 @function_executor.register_for_execution()
