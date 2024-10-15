@@ -3,6 +3,7 @@ from butia_behavior.machines.gpsr_follow import getGPSRFollowMachine
 from butia_behavior.machines.gpsr_answer import getGPSRAnswerMachine
 from butia_behavior.machines.gpsr_visual_question_answering import getGPSRVisualQuestionAnsweringMachine
 from butia_behavior.machines.gpsr_speak import getGPSRSpeakMachine
+from butia_behavior.machines.goto_fixed import getGoToFixedMachine
 from robot_interface.robot_tool import RobotTool
 import smach
 from typing import List, Callable
@@ -12,10 +13,10 @@ class ButiaBehaviorInterface:
         self.fake_execution = fake_execution
 
     def move_to(self, destination: str)->str:
-        """Navigate to a destination, person or object and return mission status"""
+        """Navigate to a destination and return mission status"""
         if self.fake_execution:
             return 'succeeded'
-        sm = getGPSRMoveToMachine(destination)
+        sm = getGoToFixedMachine(target=destination)
         outcome = sm.execute()
         return outcome
     
