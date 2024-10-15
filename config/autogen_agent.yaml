@@ -1,6 +1,12 @@
 fake_execution: false
 locations:
   - shelf
+  - kitchen
+  - operator
+  - instruct
+  - table
+  - sofa
+  - trophy shelf
 planner_examples:
   - task: Meet William in the kitchen and lead them to the exit
     steps:
