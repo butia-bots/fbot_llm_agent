@@ -16,7 +16,7 @@ class ButiaBehaviorInterface:
         """Navigate to a destination and return mission status"""
         if self.fake_execution:
             return 'succeeded'
-        sm = getGoToFixedMachine(target=destination)
+        sm = getGPSRMoveToMachine(target=destination)
         outcome = sm.execute()
         return outcome
     
