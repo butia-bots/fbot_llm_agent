@@ -3,6 +3,8 @@ from butia_behavior.machines.gpsr_follow import getGPSRFollowMachine
 from butia_behavior.machines.gpsr_answer import getGPSRAnswerMachine
 from butia_behavior.machines.gpsr_visual_question_answering import getGPSRVisualQuestionAnsweringMachine
 from butia_behavior.machines.gpsr_speak import getGPSRSpeakMachine
+from butia_behavior.machines.gpsr_pick import getGPSRPickMachine
+from butia_behavior.machines.gpsr_place import getGPSRPlaceMachine
 from butia_behavior.machines.goto_fixed import getGoToFixedMachine
 from robot_interface.robot_tool import RobotTool
 import smach
@@ -49,6 +51,22 @@ class ButiaBehaviorInterface:
         if self.fake_execution:
             return 'succeeded'
         sm = getGPSRSpeakMachine(utterance)
+        outcome = sm.execute()
+        return outcome
+
+    def pick(self, object: str)->str:
+        """Pick an object and return mission status"""
+        if self.fake_execution:
+            return 'succeeded'
+        sm = getGPSRPickMachine(obj=object)
+        outcome = sm.execute()
+        return outcome
+
+    def place(self)->str:
+        """Place previously picked object down and return mission status"""
+        if self.fake_execution:
+            return 'succeeded'
+        sm = getGPSRPlaceMachine()
         outcome = sm.execute()
         return outcome
     
