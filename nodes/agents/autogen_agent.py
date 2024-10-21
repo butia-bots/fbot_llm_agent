@@ -105,7 +105,7 @@ def speak(utterance: str)->str:
 
 @function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='pick', description='Pick an object and return execution status')
-def pick(object: Literal[tuple(config['objects'])])->str:
+def pick(object: str)->str:
     return {
         'outcome': robot_interface.pick(object=object),
         'observation': robot_interface.caption()
