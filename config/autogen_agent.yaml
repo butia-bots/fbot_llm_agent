@@ -7,6 +7,25 @@ locations:
   - table
   - sofa
   - trophy shelf
+objects:
+  - apple
+  - chocolate
+  - cloth
+  - cononut water
+  - detergent
+  - fanta
+  - gelatin
+  - kuat
+  - mustard
+  - nescau
+  - peanut
+  - pear
+  - sauce
+  - shoyo
+  - sponge
+  - tangerine
+  - tea
+  - treloso
 planner_examples:
   - task: Meet William in the kitchen and lead them to the exit
     steps:

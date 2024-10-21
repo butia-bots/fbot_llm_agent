@@ -13,7 +13,8 @@ config_list = [
   {
     "api_type": "ollama",
     "model": "llama3",
-    "client_host": "http://jetson:11434",
+    #"client_host": "http://jetson:11434",
+    "client_host": "http://0.0.0.0:11434",
     "native_tool_calls": False,
     #"api_key": "ollama",
   }
@@ -21,7 +22,8 @@ config_list = [
 
 robot_agent = AssistantAgent(
     name="General Purpose Service Robot",
-    system_message="You are a general purpose service robot. When given a step-by-step plan for executing a task, you execute each step sequentially. Reply with TERMINATE once the task is completed",
+    #system_message="You are a general purpose service robot. When given a step-by-step plan for executing a task, you execute each step sequentially. Reply with TERMINATE once the task is completed",
+    system_message="You are a general purpose service robot. Reply with TERMINATE once the task is completed",
     llm_config={'config_list': config_list}
 )
 
@@ -47,29 +49,75 @@ planner = AssistantAgent(
 )
 
 @function_executor.register_for_execution()
+@robot_agent.register_for_llm(name='query_spatial_memory', description="Query a static spatial memory with descriptions and poses of locations in the environment.")
+def query_spatial_memory(query: str)->str:
+    return {
+        'locations': robot_interface.query_spatial_memory(query=query)
+    }
+
+@function_executor.register_for_execution()
+@robot_agent.register_for_llm(name='move_to_pose', description='Navigates to a pose in the environment, and return execution status')
+def move_to_pose(x: float, y: float, yaw: float)->str:
+    return {
+        'outcome': robot_interface.move_to_pose(x=x, y=y, yaw=yaw),
+        'observation': robot_interface.caption()
+    }
+
+@function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='move_to', description='Navigate to a room, furniture or waypoint and return execution status')
-def move_to(destination: Literal[*tuple(config['locations'])])->str:
-    return robot_interface.move_to(destination=destination)
+def move_to(destination: Literal[tuple(config['locations'])])->str:
+    return {
+        'outcome': robot_interface.move_to(destination=destination),
+        'observation': robot_interface.caption()
+    }
 
 @function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='follow', description='Follow the person in front of you and return execution status')
 def follow()->str:
-    return robot_interface.follow()
+    return {
+        'outcome': robot_interface.follow(),
+        'observation': robot_interface.caption()
+    }
 
 @function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='answer', description='Speak the answer to a question from the person in front of you, and return execution status')
-def answer(question: str)->str:
-    return robot_interface.answer(question=question)
+def answer()->str:
+    return {
+        'outcome': robot_interface.answer(),
+        'observation': robot_interface.caption()
+    }
 
 @function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='visual_question_answering', description='Speak the answer to a visual question about the destination where you are, and return execution status')
 def visual_question_answering(question: str)->str:
-    return robot_interface.visual_question_answering(question=question)
+    return {
+        'outcome': robot_interface.visual_question_answering(question=question),
+        'observation': robot_interface.caption()
+    }
 
 @function_executor.register_for_execution()
 @robot_agent.register_for_llm(name='speak', description='Speak an utterance and return execution status')
 def speak(utterance: str)->str:
-    return robot_interface.speak(utterance=utterance)
+    return {
+        'outcome': robot_interface.speak(utterance=utterance),
+        'observation': robot_interface.caption()
+    }
+
+@function_executor.register_for_execution()
+@robot_agent.register_for_llm(name='pick', description='Pick an object and return execution status')
+def pick(object: Literal[tuple(config['objects'])])->str:
+    return {
+        'outcome': robot_interface.pick(object=object),
+        'observation': robot_interface.caption()
+    }
+
+@function_executor.register_for_execution()
+@robot_agent.register_for_llm(name='place', description='Place previously picked object down, and return execution status')
+def place(placement_zone: str)->str:
+    return {
+        'outcome': robot_interface.place(placement_zone=placement_zone),
+        'observation': robot_interface.caption()
+    }
 
 robot_agent.register_nested_chats(
     trigger=robot_operator,
